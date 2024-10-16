@@ -1,0 +1,411 @@
+
+library(shiny)
+library(dplyr)
+library(shinyscreenshot)
+library(glue)
+library(leaflet)
+library(sf)
+library(shinythemes)
+library(shinycssloaders)
+library(htmltools)
+
+rm(list=ls())
+
+data <- readRDS("data/data.RDS")
+data1 <- readRDS("data/data1.RDS")
+
+pak_shp <- readRDS("data/pak_shp.RDS")
+
+crop_choices <- data %>% 
+  filter(!is.na(crop)) %>% 
+  distinct(crop) %>% 
+  pull(crop)
+
+
+ui <- navbarPage("Agriculture Stats",
+                 
+                 tabPanel("INTERACTIVE MAPS",
+                          bootstrapPage(theme = shinytheme("flatly")),
+                          
+                          tags$style(type = 'text/css', '#map {height: calc(100vh - 80px) !important;}', style= 'padding-top:0px;'),
+                          leafletOutput("map") %>% 
+                            withSpinner(),
+                          br(),
+                          tags$head(tags$style("#source{color:black; font-size:12px; font-style:italic; max-height: 110px; background: yellow; }")),
+                          verbatimTextOutput("source"),
+                          
+                          absolutePanel(id = "controls", class = "panel panel-default", fixed= TRUE,
+                                        draggable = TRUE, bottom = "auto", right = "auto", left = 70, top = 80,
+                                        width = 230, height = "auto", 
+                                        style = "background-color: white;
+                                                   opacity: 0.85;
+                                                   padding: 20px 20px 20px 20px;
+                                                   margin: auto;
+                                                   border-radius: 5pt;
+                                                   box-shadow: 0pt 0pt 6pt 0px rgba(61,59,61,0.48);
+                                                   padding-bottom: 2mm;
+                                                   padding-top: 1mm;",
+                                        
+                                        selectInput("domain",
+                                                    "Choose Domain",
+                                                    selected = "Crop Output",
+                                                    choices = unique(data$domain)),
+                                        conditionalPanel(
+                                          condition = "input.domain == 'Crop Output'",
+                                          selectInput("crop", 
+                                                      "Choose Crop",
+                                                      choices = crop_choices,
+                                                      selected = "Wheat",
+                                                      width = "200px",
+                                                      selectize = T)
+                                        ),
+                                        selectInput("year",
+                                                    "Choose Year",
+                                                    choices = unique(data$year),
+                                                    selected = 2019),
+                                        
+                                        
+                                        h6(tags$b(tags$em("Use this button to download the data underlying the current on-screen map"))),
+                                        downloadButton("mapdata", "Get Data", class= "btn-sm"),
+                                        actionButton("screenshot", "Screenshot",class="btn-sm"),
+                                        
+                                        br()
+                          )
+                 ),
+                 tabPanel("Agri-Land Inequality",
+                          bootstrapPage(theme = shinytheme("flatly")),
+                          
+                          tags$style(type = 'text/css', '#map_g {height: calc(100vh - 80px) !important;}', style= 'padding-top:0px;'),
+                          leafletOutput("map_g") %>% 
+                            withSpinner(),
+                          br(),
+                          tags$head(tags$style("#source_g{color:black; font-size:12px; font-style:italic; max-height: 110px; background: yellow; }")),
+                          verbatimTextOutput("source_g"),
+                          
+                          absolutePanel(id = "controls", class = "panel panel-default", fixed= TRUE,
+                                        draggable = TRUE, bottom = "auto", right = "auto", left = 70, top = 80,
+                                        width = 230, height = "auto", 
+                                        style = "background-color: white;
+                                                   opacity: 0.85;
+                                                   padding: 20px 20px 20px 20px;
+                                                   margin: auto;
+                                                   border-radius: 5pt;
+                                                   box-shadow: 0pt 0pt 6pt 0px rgba(61,59,61,0.48);
+                                                   padding-bottom: 2mm;
+                                                   padding-top: 1mm;",
+                                        
+                                        selectInput("domain_1",
+                                                    "Choose Domain",
+                                                    selected = unique(data1$domain)[2],
+                                                    choices = unique(data1$domain)
+                                                    ),
+                                        
+                                        
+                                        
+                                        h6(tags$b(tags$em("Use this button to download the data underlying the current on-screen map"))),
+                                        downloadButton("mapdata_g", "Get Data", class= "btn-sm"),
+                                        actionButton("screenshot_g", "Screenshot",class="btn-sm"),
+                                        
+                                        br()
+                          )
+                 )
+)
+
+
+server <- function(input, output, session){
+  
+  d1  <- reactive({
+    if(input$domain == "Crop Output"){
+      data %>% 
+        filter(input$year == year,
+               domain == "Crop Output",
+               input$crop == crop)
+    }else{
+      data %>% 
+        filter(input$year == year,
+               input$domain == domain,
+               is.na(crop)) %>% 
+        select(-crop)
+    }
+  })
+  
+  
+  # map <- reactive({
+  
+  #Labelling for the Map  
+  labels <- reactive({
+    if(input$domain == "Crop Output"){
+      paste0(glue::glue("<b>District</b>: { pak_shp$district } </br>"), 
+             glue::glue("<b> { d1()$crop } (000 tonnes): </b>"), " ", 
+             glue::glue("{ round(d1()$value, 2) }"), sep = "") %>% 
+        lapply(htmltools::HTML)
+    }else if(input$domain == "Total Factor Productivity"){
+      paste0(glue::glue("<b>District</b>: { pak_shp$district } </br>"), 
+             glue::glue("<b>  TFP : </b>"), " ", 
+             glue::glue("{ round(d1()$value, 3) }"), sep = "") %>% 
+        lapply(htmltools::HTML)
+    }else if(input$domain == "Land Productivity"){
+      paste0(glue::glue("<b>District</b>: { pak_shp$district } </br>"), 
+             glue::glue("<b>  Land Prod. : </b>"), " ", 
+             glue::glue("{ round(d1()$value, 3) }"), sep = "") %>% 
+        lapply(htmltools::HTML)
+    }else {
+      paste0(glue::glue("<b>District</b>: { pak_shp$district } </br>"), 
+             glue::glue("<b>  Labor Prod. : </b>"), " ", 
+             glue::glue("{ round(d1()$value, 3) }"), sep = "") %>% 
+        lapply(htmltools::HTML)
+    }
+  })
+  
+  
+  pal <- reactive({
+    colorBin(palette = c('#FFEDA0', '#FED976', '#FEB24C', '#FD8D3C', '#FC4E2A','#E31A1C'),
+             bins= 6, na.color = "grey",  
+             domain= d1()$value, pretty = T)
+  })
+  
+  # st_transform(pak_shp, "+proj=longlat +ellps=WGS84 +datum=WGS84") %>%   #pak_shp, crs = "+init=epsg:4326" 
+  output$map <- renderLeaflet({
+    # message("rendering map")
+    leaflet(options = leafletOptions(zoomSnap = 0.20, zoomDelta = 0.20)) %>%
+      addProviderTiles(providers$CartoDB, group = "CARTO") %>%
+      setView(lng=69.5, lat = 30.5, zoom = 5.2)
+  })
+  
+  
+  
+  # output$map <- renderLeaflet({
+  
+  observe({
+ 
+    req(input$domain)   
+    # leaflet(pak_shp, options = leafletOptions(zoomSnap = 0.20, 
+    #                                           zoomDelta = 0.20)) %>% 
+      # addProviderTiles(providers$Esri, group = "ESRI") %>% 
+      # addProviderTiles(providers$OpenStreetMap , group = "OpenStreetMap") %>% 
+      # addProviderTiles(providers$Stamen.Terrain,
+      #                  options = tileOptions(minZoom = 0,
+      #                                        maxZoom = 13),
+      #                  group = "ST Terrain") %>%
+      # addProviderTiles(providers$Stamen.TonerLite, group = "Toner Lite") %>%
+      # addProviderTiles(providers$Esri.WorldImagery , group = "ESRI IMG") %>% 
+      # addProviderTiles(providers$NASAGIBS.ViirsEarthAtNight2012 , group = "NASA Nightlights") %>% 
+      # 
+      # setView(lng=69, lat = 31, zoom = 5.4) %>% 
+      
+      leafletProxy("map", 
+                   data= st_transform(pak_shp, 
+                                      crs=4326)) %>% 
+      clearShapes() %>%  
+      addPolygons(label= labels(),
+                  labelOptions = labelOptions(
+                    style = list("font-weight"= "normal",   
+                                 padding= "3px 8px",
+                                 "color"= "#cc4c02"), 
+                    textsize= "15px",
+                    direction = "auto"
+                  ),
+                  fillColor =  ~pal()(d1()$value),
+                  fillOpacity = 1,
+                  stroke = TRUE,
+                  color= "white",
+                  weight = 1,
+                  opacity = 0.7,
+                  fill = TRUE,
+                  dashArray = NULL,
+                  smoothFactor = 0.5,
+                  highlightOptions = highlightOptions(weight= 5,
+                                                      fillOpacity = 1,
+                                                      opacity= 1,
+                                                      bringToFront = TRUE), 
+                  group = "Polygons")
+      
+      # addLayersControl(baseGroups = c("ESRI", "OpenStreetMap", "ST Terrain", "Toner Lite","ESRI IMG", "NASA Nightlights"),
+      #                  overlayGroups = c("Polygons"),
+      #                  options = layersControlOptions(collapsed = TRUE)) %>% 
+      # 
+      # addMeasure() %>% 
+      # addScaleBar("bottomright") %>%
+    
+    leafletProxy("map", data= st_transform(pak_shp, 
+                                           crs=4326)) %>%
+      clearControls() %>%
+      addLegend("bottomright",
+                pal= pal(),
+                values= ~d1()$value,
+                title = "Legend",
+                opacity= 1,
+                labFormat = labelFormat(
+                  between = "  :  ",
+                  digits = 2))
+    
+      # addLegend("bottomright",
+      #           pal= pal(),
+      #           values= ~d1()$value,
+      #           title = "Legend",
+      #           opacity= 1)
+  })
+  
+  observeEvent(input$screenshot,{
+    screenshot(filename = glue("{ input$screenshot }", " ", "screenshot"), selector = "#map", scale = 0.80, timer = 1)
+    
+  })
+  
+  
+  #Download data underlying the shown map
+  output$mapdata <- downloadHandler(
+    filename = function(){
+      paste(glue("{ input$domain }"), "_", glue("{ input$year }"), ".csv")
+    },
+    content = function(file){
+      write.csv(d1(), file) 
+    }
+  )
+  
+  output$source <- renderText({
+    if(input$domain == "Crop Output"){
+      paste(" Source: CEM Data (forthcoming)", "\n",
+            "Definition: Production in thousand tonnes")
+    }else if(input$domain == "Land Productivity"){
+      paste(" Source: CEM Data (forthcoming)", "\n",
+            "Definition: Total value of production in thousand Rs. per thousand hectares of land")
+    }else if(input$domain == "Labor Productivity"){
+      paste(" Source: CEM Data (forthcoming)", "\n",
+            "Definition: Total value of production in thousand Rs. per million man-days")
+    }else{
+      "Source: CEM data (Forthcoming)"
+    }
+    
+  })
+  
+  #Gini land maps
+  g1 <- reactive({
+    data1 %>% 
+      filter(input$domain_1 == domain)
+  })
+  
+  #Labelling for the Map  
+  labels_g <- reactive({
+    paste0(glue::glue("<b>District</b>: { pak_shp$district } </br>"), 
+           glue::glue("<b> { g1()$domain }: </b>"), " ", 
+           glue::glue("{ round(g1()$value, 2) }"), sep = "") %>% 
+      lapply(htmltools::HTML)
+  })
+  
+  
+  pal_g <- reactive({
+    colorBin(palette = c("RdYlBu"), 
+             bins= 5, 
+             na.color = "grey",  
+             domain= g1()$value, 
+             pretty = T)
+  }) #'#de2d26','#fc9272','#fee0d2'   '#a50f15','#de2d26','#fb6a4a','#fcae91','#fee5d9'    '#238b45','#74c476','#bae4b3','#edf8e9'
+
+  #Lealfet
+  output$map_g <- renderLeaflet({
+    # message("rendering map")
+    leaflet(options = leafletOptions(zoomSnap = 0.20, zoomDelta = 0.20)) %>%
+      addProviderTiles(providers$CartoDB, group = "CARTO") %>%
+      setView(lng=69.5, lat = 30.5, zoom = 5.2)
+  })
+  
+  
+  outputOptions(output, "map_g", suspendWhenHidden = FALSE)
+  
+observe({  
+  
+   req(input$domain_1)
+  
+  # st_transform(pak_shp, "+proj=longlat +ellps=WGS84 +datum=WGS84") %>%   #pak_shp, crs = "+init=epsg:4326" 
+  # output$map_g <- renderLeaflet({
+    # leaflet(pak_shp, options = leafletOptions(zoomSnap = 0.20, 
+    #                                           zoomDelta = 0.20)) %>% 
+    #   addProviderTiles(providers$Esri, group = "ESRI") %>% 
+    #   addProviderTiles(providers$OpenStreetMap , group = "OpenStreetMap") %>% 
+    #   addProviderTiles(providers$Stamen.Terrain,
+    #                    options = tileOptions(minZoom = 0,
+    #                                          maxZoom = 13),
+    #                    group = "ST Terrain") %>%
+    #   addProviderTiles(providers$Stamen.TonerLite, group = "Toner Lite") %>%
+    #   addProviderTiles(providers$Esri.WorldImagery , group = "ESRI IMG") %>% 
+    #   addProviderTiles(providers$NASAGIBS.ViirsEarthAtNight2012 , group = "NASA Nightlights") %>% 
+    #   
+    #   setView(lng=69, lat = 31, zoom = 5.4) %>% 
+  
+  leafletProxy("map_g", 
+               data= st_transform(pak_shp, crs=4326)) %>% 
+    clearShapes() %>% 
+      addPolygons(label= labels_g(),
+                  labelOptions = labelOptions(
+                    style = list("font-weight"= "normal",   
+                                 padding= "3px 8px",
+                                 "color"= "#cc4c02"), 
+                    textsize= "15px",
+                    direction = "auto"
+                  ),
+                  fillColor =  ~pal_g()(g1()$value),
+                  fillOpacity = 1,
+                  stroke = TRUE,
+                  color= "white",
+                  weight = 1,
+                  opacity = 1,
+                  fill = TRUE,
+                  dashArray = NULL,
+                  smoothFactor = 0.5,
+                  highlightOptions = highlightOptions(weight= 5,
+                                                      fillOpacity = 1,
+                                                      opacity= 1,
+                                                      bringToFront = TRUE), 
+                  group = "Polygons")
+      
+      # addLayersControl(baseGroups = c("ESRI", "OpenStreetMap", "ST Terrain", "Toner Lite","ESRI IMG", "NASA Nightlights"),
+      #                  overlayGroups = c("Polygons"),
+      #                  options = layersControlOptions(collapsed = TRUE)) %>% 
+      # 
+      # addMeasure() %>% 
+      # addScaleBar("bottomright") %>%
+      
+  leafletProxy("map_g", data= st_transform(pak_shp, 
+                                         crs=4326)) %>%
+    clearControls() %>%
+    addLegend("bottomright",
+              pal= pal_g(),
+              values= ~g1()$value,
+              title = "Legend",
+              opacity= 1,
+              labFormat = labelFormat(
+                between = "  :  ",
+                digits = 2))
+  
+  
+  # addLegend("bottomright",
+  #               pal= pal_g(),
+  #               values= ~g1()$value,
+  #               title = "Legend",
+  #               opacity= 1)
+  })
+  
+  observeEvent(input$screenshot_g,{
+    screenshot(filename = glue("{ input$screenshot_g }", " ", "screenshot"), selector = "#map_g", scale = 0.80, timer = 1)
+    
+  })
+  
+  
+  #Download data underlying the shown map
+  output$mapdata_g <- downloadHandler(
+    filename = function(){
+      paste(glue("{ input$domain_1 }"), ".csv")
+    },
+    content = function(file){
+      write.csv(g1(), file) 
+    }
+  )
+  
+  output$source_g <- renderText({
+    paste("Source: PSLM-2010 & PSLM-2019")
+    
+  })
+  
+}
+
+shinyApp(ui, server)
